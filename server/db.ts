@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, like, and, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, products, InsertProduct, orders, orderItems, InsertOrder, InsertOrderItem } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -56,8 +56,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role;
       updateSet.role = user.role;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
+      values.role = 'administrator';
+      updateSet.role = 'administrator';
     }
 
     if (!values.lastSignedIn) {
@@ -90,3 +90,95 @@ export async function getUserByOpenId(openId: string) {
 }
 
 // TODO: add feature queries here as your schema grows.
+
+/**
+ * Product Management Functions
+ */
+export async function getAllProducts() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(products);
+}
+
+export async function getProductByBarcode(barcode: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(products).where(eq(products.barcode, barcode)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function searchProducts(query: string, color?: string, minPrice?: number, maxPrice?: number) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const conditions = [];
+  if (query) {
+    conditions.push(like(products.productName, `%${query}%`));
+  }
+  if (color) {
+    conditions.push(eq(products.color, color));
+  }
+  if (minPrice !== undefined) {
+    conditions.push(gte(products.price, minPrice.toString()));
+  }
+  if (maxPrice !== undefined) {
+    conditions.push(lte(products.price, maxPrice.toString()));
+  }
+  
+  if (conditions.length === 0) {
+    return db.select().from(products);
+  }
+  
+  return db.select().from(products).where(and(...conditions));
+}
+
+export async function upsertProduct(product: InsertProduct) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  await db.insert(products).values(product).onDuplicateKeyUpdate({
+    set: {
+      productName: product.productName,
+      price: product.price,
+      color: product.color,
+      description: product.description,
+      imageUrl: product.imageUrl,
+      updatedAt: new Date(),
+    },
+  });
+}
+
+export async function deleteProduct(barcode: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(products).where(eq(products.barcode, barcode));
+}
+
+/**
+ * Order Management Functions
+ */
+export async function createOrder(order: InsertOrder) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  
+  const result = await db.insert(orders).values(order);
+  return result;
+}
+
+export async function getUserOrders(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(orders).where(eq(orders.userId, userId));
+}
+
+export async function addOrderItem(item: InsertOrderItem) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(orderItems).values(item);
+}
+
+export async function getOrderItems(orderId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+}
